@@ -36,6 +36,12 @@
       box-sizing: border-box;
     }
 
+    .stack {
+      width: 100%;
+      display: grid;
+      gap: 10px;
+    }
+
     .bar {
       width: min(var(--w), 92vw);
       height: var(--h);
@@ -111,10 +117,18 @@
 
 <body>
   <div class="wrap">
-    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="500" aria-valuenow="0">
-      <div class="fill" id="fill"></div>
-      <div class="value" id="valueText">0 / 500</div>
+    <div class="stack">
+      <div class="bar" id="bar1" role="progressbar" aria-valuemin="0" aria-valuemax="500" aria-valuenow="0">
+        <div class="fill" id="fill1"></div>
+        <div class="value" id="valueText1">0 / 500</div>
+      </div>
+
+      <div class="bar" id="bar2" role="progressbar" aria-valuemin="0" aria-valuemax="500" aria-valuenow="0">
+        <div class="fill" id="fill2"></div>
+        <div class="value" id="valueText2">0 / 500</div>
+      </div>
     </div>
+
     <div class="sub" id="debugText">Waiting for SDK message…</div>
   </div>
 
@@ -122,77 +136,91 @@
     const MIN = 0;
     const MAX = 500;
 
-    const bar = document.getElementById('bar');
-    const fill = document.getElementById('fill');
-    const valueText = document.getElementById('valueText');
+    const bar1 = document.getElementById('bar1');
+    const fill1 = document.getElementById('fill1');
+    const valueText1 = document.getElementById('valueText1');
+
+    const bar2 = document.getElementById('bar2');
+    const fill2 = document.getElementById('fill2');
+    const valueText2 = document.getElementById('valueText2');
+
     const debugText = document.getElementById('debugText');
 
-    let wasFull = false;
+    let wasFull1 = false;
+    let wasFull2 = false;
 
     function clamp(n, min, max) {
       return Math.max(min, Math.min(max, n));
     }
 
-    function setProgress(value) {
+    function setProgress(barEl, fillEl, valueEl, value, wasFull) {
       const v = clamp(value, MIN, MAX);
       const pct = (v / MAX) * 100;
 
-      fill.style.width = pct.toFixed(2) + '%';
-      valueText.textContent = `${v} / ${MAX}`;
-      bar.setAttribute('aria-valuenow', String(v));
+      fillEl.style.width = pct.toFixed(2) + '%';
+      valueEl.textContent = `${v} / ${MAX}`;
+      barEl.setAttribute('aria-valuenow', String(v));
 
       const isFull = (v >= MAX);
 
       // Play "full" animation only when crossing into full
       if (isFull && !wasFull) {
-        bar.classList.remove('full');
-        void bar.offsetWidth; // restart animation reliably
-        bar.classList.add('full');
+        barEl.classList.remove('full');
+        void barEl.offsetWidth; // restart animation reliably
+        barEl.classList.add('full');
       }
 
-      if (bar.classList.contains('full')) {
-        clearTimeout(setProgress._t);
-        setProgress._t = setTimeout(() => bar.classList.remove('full'), 1000);
+      if (barEl.classList.contains('full')) {
+        clearTimeout(barEl._fullTimer);
+        barEl._fullTimer = setTimeout(() => barEl.classList.remove('full'), 1000);
       }
 
-      wasFull = isFull;
+      return isFull;
     }
 
-    // Strict numeric string parser (e.g., "123")
-    function parseStrictNumberString(message) {
+    // Parse two integers from a strict numeric pair string, e.g. "123 45" or "123,45"
+    function parseTwoNumbers(message) {
       const str = String(message).trim();
-      // Optional: allow leading +/-, remove if you only want unsigned
-      if (!/^[+-]?\d+$/.test(str)) return null;
-      const n = parseInt(str, 10);
-      return Number.isFinite(n) ? n : null;
-    }
 
-    if (window.PortalsSdk && typeof PortalsSdk.setMessageListener === 'function') {
+      // Accept one or more spaces and/or commas as separator
+      const parts = str.split(/[ ,]+/).filter(Boolean);
+      if (parts.length !== 2) return null;
+
+      // Strict integer tokens
+      if (!/^[+-]?[0-9]+$/.test(parts[0]) || !/^[+-]?[0-9]+$/.test(parts[1])) return null;
+
+      const a = parseInt(parts[0], 10);
+      const b = parseInt(parts[1], 10);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+
+      return [a, b];
+    }
+    // Assume PortalsSdk is present (no window checks)
+    try {
       PortalsSdk.setMessageListener((message) => {
         console.log("PORTALS MSG:", message);
 
-        const parsed = parseStrictNumberString(message);
-        if (parsed === null) {
-          debugText.textContent = `Invalid numeric string: ${String(message)}`;
+        const parsed = parseTwoNumbers(message);
+        if (!parsed) {
+          debugText.textContent = `Invalid message (expected two integers): ${String(message)}`;
           return;
         }
 
-        debugText.textContent = `Last value: ${parsed}`;
-        setProgress(parsed);
+        const [topValue, bottomValue] = parsed;
+        debugText.textContent = `Last values: ${topValue}, ${bottomValue}`;
+
+        wasFull1 = setProgress(bar1, fill1, valueText1, topValue, wasFull1);
+        wasFull2 = setProgress(bar2, fill2, valueText2, bottomValue, wasFull2);
       });
 
       debugText.textContent = "Listening for SDK messages…";
-    } else {
-      // Fallback demo if opened without the SDK
-      debugText.textContent = "PortalsSdk not detected. Using demo updates.";
-      let demo = 0;
-      setInterval(() => {
-        demo = (demo + 25) % (MAX + 100);
-        setProgress(demo);
-      }, 600);
+    } catch (e) {
+      console.error(e);
+      debugText.textContent = "PortalsSdk not available.";
     }
 
-    setProgress(0);
+    wasFull1 = setProgress(bar1, fill1, valueText1, 0, wasFull1);
+    wasFull2 = setProgress(bar2, fill2, valueText2, 0, wasFull2);
   </script>
 </body>
 </html>
