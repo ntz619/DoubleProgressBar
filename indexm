@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Game UI Progress Bar</title>
+
+  <!-- Portals SDK -->
+  <script src="https://portals-labs.github.io/portals-sdk/portals-sdk.js?v=10005456"></script>
+
+  <style>
+    :root {
+      --w: 520px;
+      --h: 34px;
+      --radius: 999px;
+      --border: rgba(255,255,255,0.22);
+      --bg: rgba(0,0,0,0.35);
+      --fill: rgba(255,255,255,0.90);
+      --text: rgba(255,255,255,0.95);
+      --shadow: rgba(0,0,0,0.55);
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+    }
+
+    .wrap {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+
+    .stack {
+      width: 100%;
+      display: grid;
+      gap: 10px;
+    }
+
+    .bar {
+      width: min(var(--w), 92vw);
+      height: var(--h);
+      position: relative;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.25);
+      transform: translateZ(0);
+    }
+
+    .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0%;
+      background: var(--fill);
+      border-radius: var(--radius);
+      transition: width 450ms cubic-bezier(.2,.8,.2,1);
+      will-change: width, transform, filter;
+    }
+
+    .value {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      font-size: 14px;
+      line-height: 1;
+      user-select: none;
+      pointer-events: none;
+
+      /* Always readable */
+      color: rgba(255,255,255,0.98);
+      text-shadow:
+        0 2px 8px var(--shadow),
+        0 0 1px rgba(0,0,0,0.9),
+        0 0 10px rgba(0,0,0,0.35);
+      mix-blend-mode: difference;
+    }
+
+    .sub {
+      margin-top: 10px;
+      opacity: 0.8;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .bar.full .fill {
+      animation: fullPulse 900ms ease-out 1;
+      filter: drop-shadow(0 0 10px rgba(255,255,255,0.25));
+    }
+    .bar.full {
+      animation: fullPop 650ms cubic-bezier(.2,.8,.2,1) 1;
+    }
+
+    @keyframes fullPop {
+      0%   { transform: scale(1); }
+      35%  { transform: scale(1.04); }
+      70%  { transform: scale(0.99); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes fullPulse {
+      0%   { transform: scaleX(1); }
+      40%  { transform: scaleX(1.01); }
+      100% { transform: scaleX(1); }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="stack">
+      <div class="bar" id="bar1" role="progressbar" aria-valuemin="0" aria-valuemax="500" aria-valuenow="0">
+        <div class="fill" id="fill1"></div>
+        <div class="value" id="valueText1">0 / 500</div>
+      </div>
+
+      <div class="bar" id="bar2" role="progressbar" aria-valuemin="0" aria-valuemax="500" aria-valuenow="0">
+        <div class="fill" id="fill2"></div>
+        <div class="value" id="valueText2">0 / 500</div>
+      </div>
+    </div>
+
+    <div class="sub" id="debugText">Waiting for SDK message…</div>
+  </div>
+
+  <script>
+    const MIN = 0;
+    const MAX = 500;
+
+    const bar1 = document.getElementById('bar1');
+    const fill1 = document.getElementById('fill1');
+    const valueText1 = document.getElementById('valueText1');
+
+    const bar2 = document.getElementById('bar2');
+    const fill2 = document.getElementById('fill2');
+    const valueText2 = document.getElementById('valueText2');
+
+    const debugText = document.getElementById('debugText');
+
+    let wasFull1 = false;
+    let wasFull2 = false;
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function setProgress(barEl, fillEl, valueEl, value, wasFull) {
+      const v = clamp(value, MIN, MAX);
+      const pct = (v / MAX) * 100;
+
+      fillEl.style.width = pct.toFixed(2) + '%';
+      valueEl.textContent = `${v} / ${MAX}`;
+      barEl.setAttribute('aria-valuenow', String(v));
+
+      const isFull = (v >= MAX);
+
+      // Play "full" animation only when crossing into full
+      if (isFull && !wasFull) {
+        barEl.classList.remove('full');
+        void barEl.offsetWidth; // restart animation reliably
+        barEl.classList.add('full');
+      }
+
+      if (barEl.classList.contains('full')) {
+        clearTimeout(barEl._fullTimer);
+        barEl._fullTimer = setTimeout(() => barEl.classList.remove('full'), 1000);
+      }
+
+      return isFull;
+    }
+
+    // Parse two integers from a strict numeric pair string, e.g. "123 45" or "123,45"
+    function parseGreenBlue(message) {
+      const str = String(message);
+
+      // Only care about these parts anywhere in the string:
+      //   Green=<int>  and  Blue=<int>
+      const greenMatch = str.match(/\bGreen\s*=\s*([+-]?[0-9]+)\b/);
+      const blueMatch  = str.match(/\bBlue\s*=\s*([+-]?[0-9]+)\b/);
+
+      if (!greenMatch || !blueMatch) return null;
+
+      const green = parseInt(greenMatch[1], 10);
+      const blue  = parseInt(blueMatch[1], 10);
+      if (!Number.isFinite(green) || !Number.isFinite(blue)) return null;
+
+      return { green, blue };
+    }
+    // Assume PortalsSdk is present (no window checks)
+    try {
+      PortalsSdk.setMessageListener((message) => {
+        console.log("PORTALS MSG:", message);
+
+        const parsed = parseGreenBlue(message);
+        if (!parsed) {
+          debugText.textContent = `Missing Green/Blue values in message: ${String(message)}`;
+          return;
+        }
+
+        const topValue = parsed.green;
+        const bottomValue = parsed.blue;
+        debugText.textContent = `Green: ${topValue}  |  Blue: ${bottomValue}`;
+
+        wasFull1 = setProgress(bar1, fill1, valueText1, topValue, wasFull1);
+        wasFull2 = setProgress(bar2, fill2, valueText2, bottomValue, wasFull2);
+      });
+
+      debugText.textContent = "Listening for SDK messages…";
+    } catch (e) {
+      console.error(e);
+      debugText.textContent = "PortalsSdk not available.";
+    }
+
+    wasFull1 = setProgress(bar1, fill1, valueText1, 0, wasFull1);
+    wasFull2 = setProgress(bar2, fill2, valueText2, 0, wasFull2);
+  </script>
+</body>
+</html>
