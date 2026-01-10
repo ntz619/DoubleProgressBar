@@ -1,7 +1,3 @@
-I’ll keep your existing SDK listener/parsing/timer intact and only add minimal JS: a `sendMessage()` helper (exactly as provided), store latest scores, and when the timer hits 0 compare and send the correct Portals messages once.
-
-
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -213,9 +209,7 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
 <body>
   <div class="wrap">
     <div class="stack">
-      <!-- Single-row HUD like the screenshot -->
       <div class="hud" aria-label="Scoreboard">
-        <!-- LEFT (RED) -->
         <div
           class="team team--red bar"
           id="bar1"
@@ -230,13 +224,11 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
           <div class="score" id="valueText1">0</div>
         </div>
 
-        <!-- CENTER (TIME) -->
         <div class="timebox" aria-label="Time">
           <div class="timeLabel">TIME</div>
           <div class="timeText" id="timeText" aria-live="polite">5:00</div>
         </div>
 
-        <!-- RIGHT (BLUE) -->
         <div
           class="team team--blue bar"
           id="bar2"
@@ -288,6 +280,7 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
     const START_SECONDS = 5 * 60;
     let countdownStartMs = null;
     let timerHandle = null;
+    let finishHandle = null; // <-- NEW: reliable end-of-round trigger
 
     const timeText = document.getElementById('timeText');
 
@@ -302,7 +295,6 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
       if (didSendRoundResult) return;
       didSendRoundResult = true;
 
-      // Always send round_finish, then the winner
       if (latestRedScore > latestBlueScore) {
         sendMessage('round_finish', 'SetNotActiveToActive');
         sendMessage('RedWins', 'SetNotActiveToActive');
@@ -310,28 +302,45 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
         sendMessage('round_finish', 'SetNotActiveToActive');
         sendMessage('BlueWins', 'SetNotActiveToActive');
       } else {
-        // Tie: only round_finish (no winner specified)
+        // tie: only round_finish (no instruction given for ties)
         sendMessage('round_finish', 'SetNotActiveToActive');
       }
     }
 
+    function finishRoundNow() {
+      // stop timers (safe to call multiple times)
+      if (timerHandle) {
+        clearInterval(timerHandle);
+        timerHandle = null;
+      }
+      if (finishHandle) {
+        clearTimeout(finishHandle);
+        finishHandle = null;
+      }
+
+      renderTime(0);
+      sendRoundResultIfNeeded();
+    }
+
     function startCountdownIfNeeded() {
-      if (timerHandle) return;
+      if (timerHandle || finishHandle) return;
 
       countdownStartMs = Date.now();
+
+      // NEW: schedule a guaranteed round finish after 5:00
+      finishHandle = setTimeout(() => {
+        finishRoundNow();
+      }, START_SECONDS * 1000);
+
+      // keep the display ticking (visual only)
       timerHandle = setInterval(() => {
         const elapsed = Math.floor((Date.now() - countdownStartMs) / 1000);
         const remaining = START_SECONDS - elapsed;
-
         renderTime(remaining);
 
+        // Safety: if something drifts, still finish
         if (remaining <= 0) {
-          clearInterval(timerHandle);
-          timerHandle = null;
-          renderTime(0);
-
-          // Compare scores and send result when timer ends
-          sendRoundResultIfNeeded();
+          finishRoundNow();
         }
       }, 250);
     }
@@ -371,12 +380,9 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
       return isFull;
     }
 
-    // Parse two integers from a strict numeric pair string, e.g. "123 45" or "123,45"
     function parseGreenBlue(message) {
       const str = String(message);
 
-      // Only care about these parts anywhere in the string:
-      //   Green=<int>  and  Blue=<int>
       const greenMatch = str.match(/\bGreen\s*=\s*([+-]?[0-9]+)\b/);
       const blueMatch  = str.match(/\bBlue\s*=\s*([+-]?[0-9]+)\b/);
 
@@ -389,7 +395,6 @@ I’ll keep your existing SDK listener/parsing/timer intact and only add minimal
       return { green, blue };
     }
 
-    // Assume PortalsSdk is present (no window checks)
     try {
       PortalsSdk.setMessageListener((message) => {
         console.log("PORTALS MSG:", message);
